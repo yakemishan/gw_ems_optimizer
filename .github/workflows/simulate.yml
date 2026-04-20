@@ -1,0 +1,26 @@
+name: EMS Simulator
+
+on:
+  push:
+    paths:
+      - 'ems_optimizer.py'
+  workflow_dispatch:
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install scipy
+
+      - name: Run simulator
+        run: python ems_simulator.py
