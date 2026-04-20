@@ -91,10 +91,10 @@ def run_scenario(name, start_dt, soc_pct, pv_profile, price_profile, cons_profil
     win_map = {s["dt"]: windows[i] for i, s in enumerate(horizon)}
 
     print(f"\n{'Godz':>5} {'Okno':<12} {'Tryb':<22} "
-          f"{'PV':>6} {'Cons':>6} {'Cena':>7} "
+          f"{'PV':>6} {'Cons':>6} {'Buy':>6} {'RCE':>7} "
           f"{'Ch':>5} {'Dis':>5} {'Imp':>6} {'Exp':>6} "
           f"{'SoC':>6} {'Min':>5}")
-    print("─"*105)
+    print("─"*115)
 
     errors = []
     for s in plan[:24]:
@@ -107,7 +107,7 @@ def run_scenario(name, start_dt, soc_pct, pv_profile, price_profile, cons_profil
 
         print(f"{s['dt'].hour:>5}:00 {w:<12} {s['mode']:<22} "
               f"{s.get('pv_kwh',0):>6.2f} {s.get('consumption_kwh',0):>6.2f} "
-              f"{s.get('price',0):>6.1f} "
+              f"{s.get('buy_price_pln_kwh',0):>6.4f} {s.get('price',0):>6.1f} "
               f"{ch:>5.2f} {dis:>5.2f} {imp:>6.3f} {exp:>6.3f} "
               f"{s.get('soc_after_pct',0):>5.1f}% {s.get('min_soc_pct',0):>4.0f}% {flag}")
 
