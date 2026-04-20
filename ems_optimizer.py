@@ -19,7 +19,8 @@ except ImportError:
 # ----------------------------------------------
 # STALE
 # ----------------------------------------------
-BAT_CAPACITY         = 15.0
+BAT_CAPACITY         = 15.0   # kWh (uszkodzone ogniwa - efektywna pojemność)
+EMS_VERSION          = "2.2.0"
 BAT_MIN_SOC          = 0.10
 BAT_MAX_SOC          = 1.00
 BAT_MAX_CHARGE_KW    = 5.0   # max moc ładowania (EMS power limit)
@@ -62,7 +63,7 @@ def g13_price(dt: datetime) -> float:
 class EmsOptimizer(hass.Hass):
 
     def initialize(self):
-        self.log("EMS Optimizer - start (horyzont 36h, sesje co 6h)")
+        self.log(f"EMS Optimizer v{EMS_VERSION} - start (horyzont 36h, sesje co 6h)")
 
         # -- Konfiguracja z apps.yaml --------------------------------------
         self._mysql_cfg = {
@@ -458,7 +459,7 @@ class EmsOptimizer(hass.Hass):
         min_kwh      = BAT_MIN_SOC * BAT_CAPACITY
         max_kwh      = BAT_MAX_SOC * BAT_CAPACITY
 
-        min_soc_per_slot = self._calc_min_soc(horizon, min_kwh)
+        min_soc_per_slot = self._calc_min_soc(horizon, min_kwh, soc_init_kwh)
 
         for j in range(n):
             row_lo = [0.0] * total_vars
@@ -582,36 +583,40 @@ class EmsOptimizer(hass.Hass):
     # ------------------------------------------
     # MINIMALNE SOC PER SLOT
     # ------------------------------------------
-    def _calc_min_soc(self, horizon: list[dict], min_kwh: float) -> list[float]:
+    def _calc_min_soc(self, horizon: list[dict], min_kwh: float, soc_init_kwh: float = None) -> list[float]:
         """
         Dla każdego slotu oblicza minimalne SoC jakie musi zostać w baterii.
 
-        Zasada: bateria musi pokryć zużycie we WSZYSTKICH slotach gdzie
-        import jest niemożliwy lub niepożądany:
-        1. Szczyty G13 (import drogi)
-        2. Sloty nocne bez PV - aż do momentu gdy PV zaczyna produkować
-           (nigdy nie sprzedajemy żeby potem kupić z sieci)
+        Logika:
+        1. Sumuj zużycie tylko dla slotów bez PV (pv < 0.5 kWh)
+           - Szczyty G13 w dzień NIE są wliczane — gdy PV produkuje, pokrywa szczyt
+        2. Ogranicz min_soc[j] do fizycznie osiągalnego przy nocnym rozładowaniu
+           (soc_init - skumulowany deficyt 0..j), żeby LP nie był infeasible
         """
         n       = len(horizon)
         min_soc = [0.0] * n
 
+        # Krok 1: oblicz rezerwę bazową (tylko sloty bez PV)
         for j in range(n):
             needed = 0.0
             for i in range(j, n):
-                slot = horizon[i]
-                is_peak    = slot["buy_price_pln_kwh"] > G13_POZOSTALE
-                is_no_pv   = slot["pv_kwh"] < 0.5
-                pv_deficit = max(0.0, slot["consumption_kwh"] - slot["pv_kwh"])
-
-                if is_peak or is_no_pv:
-                    # Szczyt G13 lub brak PV - sumuj zużycie
-                    needed += pv_deficit
+                slot     = horizon[i]
+                is_no_pv = slot["pv_kwh"] < 0.5
+                deficit  = max(0.0, slot["consumption_kwh"] - slot["pv_kwh"])
+                if is_no_pv:
+                    needed += deficit
                 else:
-                    # PV produkuje wystarczająco - zatrzymaj sumowanie
                     break
+            min_soc[j] = max(min_kwh, min(needed, BAT_CAPACITY * 0.9))
 
-            reserve = max(min_kwh, min(needed, BAT_CAPACITY * 0.9))
-            min_soc[j] = reserve
+        # Krok 2: ogranicz do fizycznie osiągalnego (zapobiega infeasible LP)
+        if soc_init_kwh is not None:
+            cum_deficit = 0.0
+            for j in range(n):
+                s           = horizon[j]
+                cum_deficit += max(0.0, s["consumption_kwh"] - s["pv_kwh"])
+                max_achievable = max(min_kwh, soc_init_kwh - cum_deficit)
+                min_soc[j]  = min(min_soc[j], max_achievable)
 
         return min_soc
 
