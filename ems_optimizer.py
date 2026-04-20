@@ -19,7 +19,7 @@ except ImportError:
 # ----------------------------------------------
 # STALE
 # ----------------------------------------------
-BAT_CAPACITY         = 18.0
+BAT_CAPACITY         = 15.0
 BAT_MIN_SOC          = 0.10
 BAT_MAX_SOC          = 1.00
 BAT_MAX_CHARGE_KW    = 5.0   # max moc ładowania (EMS power limit)
