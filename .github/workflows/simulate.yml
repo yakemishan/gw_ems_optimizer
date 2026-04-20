@@ -4,12 +4,13 @@ on:
   push:
     paths:
       - 'ems_optimizer.py'
+      - 'ems_simulator.py'
   workflow_dispatch:
 
 jobs:
   simulate:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,7 +21,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install scipy
+        run: pip install scipy pytz
 
       - name: Run simulator
         run: python ems_simulator.py
