@@ -521,6 +521,26 @@ class EmsOptimizer(hass.Hass):
                 A_eq=A_eq, b_eq=b_eq,
                 bounds=bounds, method="highs",
             )
+            def _post_process_cycling(x, idx_c, idx_d, n, horizon):
+    """
+    Jeśli LP zwróci cycling (ch > 0 i dis > 0 w tym samym slocie),
+    usun mniejszy z nich (priorytet: ładowanie > rozładowanie).
+    Następnie przelicz bilans i SoC.
+    """
+    THRESHOLD = 0.05
+    x = list(x)  # Make mutable
+    
+    for j in range(n):
+        ch = max(0.0, x[idx_c(j)])
+        dis = max(0.0, x[idx_d(j)])
+        
+        # Cycling detection
+        if ch > THRESHOLD and dis > THRESHOLD:
+            # Priorytet: ładowanie (ch). Zeruj rozładowanie.
+            x[idx_d(j)] = 0.0
+            # Ewentualnie można też zerować ch, ale ładowanie jest lepsze
+    
+    return x
         except Exception as e:
             self.log(f"linprog exception: {e} - fallback auto", level="WARNING")
             return self._safe_auto_plan(soc_init, horizon)
@@ -530,6 +550,7 @@ class EmsOptimizer(hass.Hass):
             return self._safe_auto_plan(soc_init, horizon)
 
         x       = result.x
+        x = self._post_process_cycling(x, idx_c, idx_d, n, horizon)
         plan    = []
         soc_kwh = soc_init_kwh
 
@@ -537,16 +558,16 @@ class EmsOptimizer(hass.Hass):
         windows = self._find_price_windows(horizon)
 
         # DEBUG: log okien
-        self.log(f"LP DEBUG: soc_init={soc_init_kwh:.2f}kWh")
-        for jj in range(min(12, len(horizon))):
-            ch_r  = max(0.0, x[idx_c(jj)])
-            dis_r = max(0.0, x[idx_d(jj)])
-            self.log(
-                f"LP DEBUG slot {horizon[jj]['dt'].strftime('%H:%M')}: "
-                f"ch={ch_r:.2f} dis={dis_r:.2f} "
-                f"soc_lp={soc_init_kwh + sum(max(0,x[idx_c(k)])-max(0,x[idx_d(k)]) for k in range(jj+1)):.2f} "
-                f"window={windows[jj]}"
-            )
+        #self.log(f"LP DEBUG: soc_init={soc_init_kwh:.2f}kWh")
+        #for jj in range(min(12, len(horizon))):
+        #    ch_r  = max(0.0, x[idx_c(jj)])
+        #    dis_r = max(0.0, x[idx_d(jj)])
+       #     self.log(
+       #         f"LP DEBUG slot {horizon[jj]['dt'].strftime('%H:%M')}: "
+      #          f"ch={ch_r:.2f} dis={dis_r:.2f} "
+      #          f"soc_lp={soc_init_kwh + sum(max(0,x[idx_c(k)])-max(0,x[idx_d(k)]) for k in range(jj+1)):.2f} "
+        #        f"window={windows[jj]}"
+        #    )
 
         for j, slot in enumerate(horizon):
             ch  = max(0.0, x[idx_c(j)])
