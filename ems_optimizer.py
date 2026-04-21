@@ -245,6 +245,9 @@ class EmsOptimizer(hass.Hass):
                 dtime_str = entry.get("dtime", "")
                 dt  = CEST.localize(datetime.strptime(dtime_str, "%Y-%m-%d %H:%M:%S"))
                 key = dt.replace(minute=0, second=0, microsecond=0)
+                # ✨ KONWERSJA: PLN/kWh → PLN/MWh
+                rce_pln_kwh = float(entry.get("rce_pln", 0))
+                rce_pln_mwh = rce_pln_kwh * 1000  # ← DODAJ TO
                 buckets.setdefault(key, []).append(float(entry.get("rce_pln", 0)))
             except Exception:
                 continue
