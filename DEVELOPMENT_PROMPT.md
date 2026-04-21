@@ -13,12 +13,12 @@
 
 | Encja | Typ | Opis | Pytanie |
 |-------|-----|------|---------|
-| `sensor.solcast_pv_forecast_prognoza_na_dzisiaj` | `sensor` | PV na dziś (36 slotów godzinowych, detailedHourly) | Ile PV będzie w każdej godzinie? |
+| `sensor.solcast_pv_forecast_prognoza_na_dzisiaj` | `sensor` | PV na dziś , detailedHourly) | Ile PV będzie w każdej godzinie? |
 | `sensor.solcast_pv_forecast_prognoza_na_jutro` | `sensor` | PV na jutro (fallback gdy jutro niedostępne) | Ile PV jutro? |
 | `sensor.rce_pse_cena` | `sensor` | Aktualna cena RCE (PLN/MWh) — SPRZEDAŻ | Za ile sprzedać energię teraz? |
 | `sensor.rce_pse_cena_jutro` | `sensor` | Ceny RCE na jutro (dostępne od ~13:00) | Za ile sprzedamy jutro? |
 | `sensor.battery_state_of_charge` | `sensor` | Aktualny SoC baterii (%) | Ile procent baterii mamy? |
-| `sensor.inwerter_dom_dzienne_zuzycie` | `sensor` | Kumulatywne zużycie domu (kWh) — 14 dni średnia | Ile średnio zużywamy na godzinę? |
+| `sensor.inwerter_dom_dzienne_zuzycie` | `sensor` | Kumulatywne zużycie domu (kWh) — Codzienny reset | Ile średnio zużywamy na godzinę? |
 
 ### Wyjścia (decyzje optimizera do Node-RED)
 
@@ -145,8 +145,9 @@ ELSE:                             # night, after_min
    - Nigdy nie sprzedawaj PV żeby potem kupić z sieci (blokada przez `_calc_min_soc`)
 
 4. **Obsługa ujemnych cen RCE**
-   - Gdy RCE < 0 → ładuj baterię z sieci (`charge_battery` + import)
+   - Gdy RCE < 0 → ładuj baterie z PV -> Auto
    - Nie sprzedawaj (exp = 0)
+   - optymalizuj tak, zeby bateria byla pusta przed niskimi cenami
 
 ### Heurystyka okien cenowych
 
