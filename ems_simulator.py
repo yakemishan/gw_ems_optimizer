@@ -27,7 +27,7 @@ sys.modules["mysql"]                   = mock_mysql
 sys.modules["mysql.connector"]         = mock_connector
 sys.modules["mysql.connector.pooling"] = mock_pooling
 
-from ems_optimizer_fixed import (
+from ems_optimizer import (
     BAT_CAPACITY, BAT_MIN_SOC, BAT_MAX_SOC,
     BAT_MAX_CHARGE_KW, BAT_MAX_DISCHARGE_KW, INVERTER_MAX_KW,
     G13_SZCZYT_PRZED, G13_SZCZYT_PO, G13_POZOSTALE,
