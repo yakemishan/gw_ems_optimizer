@@ -27,7 +27,7 @@ sys.modules["mysql"]                   = mock_mysql
 sys.modules["mysql.connector"]         = mock_connector
 sys.modules["mysql.connector.pooling"] = mock_pooling
 
-from ems_optimizer import (
+from ems_optimizer_fixed import (
     BAT_CAPACITY, BAT_MIN_SOC, BAT_MAX_SOC,
     BAT_MAX_CHARGE_KW, BAT_MAX_DISCHARGE_KW, INVERTER_MAX_KW,
     G13_SZCZYT_PRZED, G13_SZCZYT_PO, G13_POZOSTALE,
@@ -111,6 +111,11 @@ def run_scenario(name, start_dt, soc_pct, pv_profile, price_profile, cons_profil
               f"{ch:>5.2f} {dis:>5.2f} {imp:>6.3f} {exp:>6.3f} "
               f"{s.get('soc_after_pct',0):>5.1f}% {s.get('min_soc_pct',0):>4.0f}% {flag}")
 
+        # Walidacja: cycling detection
+        if ch > 0.05 and dis > 0.05:
+            errors.append(f"  ⚠️ CYCLING: ch={ch:.2f} i dis={dis:.2f} razem o {s['dt'].hour}:00 "
+                         f"(post-processing powinien to naprawić!)")
+        
         if imp > 0.1 and g13_price(s["dt"]) > G13_POZOSTALE:
             errors.append(f"  ❌ import w szczycie G13 o {s['dt'].hour}:00!")
         if s["mode"] == "sell_power" and s.get("pv_kwh", 0) < 2.0:
