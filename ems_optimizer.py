@@ -583,6 +583,9 @@ class EmsOptimizer(hass.Hass):
 
             soc_pct_now = soc_kwh / BAT_CAPACITY * 100
             mode, reason = self._mode_from_lp(ch, dis, imp, exp, slot, soc_pct_now, windows[j])
+            if mode == "battery_standby":
+                ch = 0.0
+                dis = 0.0
             # SoC z LP (teraz poprawione dzięki post-processing cycling'u)
             soc_kwh = max(min_kwh, min(max_kwh, soc_kwh + ch - dis))
 
