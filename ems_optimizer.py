@@ -20,7 +20,7 @@ except ImportError:
 # STALE
 # ----------------------------------------------
 BAT_CAPACITY         = 15.0   # kWh (uszkodzone ogniwa - efektywna pojemność)
-EMS_VERSION          = "2.2.0"
+EMS_VERSION          = "2.2.1"  # Bump: post-processing cycling
 BAT_MIN_SOC          = 0.10
 BAT_MAX_SOC          = 1.00
 BAT_MAX_CHARGE_KW    = 5.0   # max moc ładowania (EMS power limit)
@@ -426,7 +426,38 @@ class EmsOptimizer(hass.Hass):
             self.log(traceback.format_exc(), level="ERROR")
 
     # ------------------------------------------
-    # OPTYMALIZACJA LP (bez zmian)
+    # POST-PROCESSING: Eliminacja cycling'u
+    # ------------------------------------------
+    def _post_process_cycling(self, x, idx_c, idx_d, n, horizon):
+        """
+        Jeśli LP zwróci cycling (ch > 0 i dis > 0 w tym samym slocie),
+        usuń mniejszy z nich. Priorytet: ładowanie > rozładowanie.
+        
+        Logika:
+        - Jeśli ch > threshold AND dis > threshold → dis = 0 (ładowanie wygrywa)
+        - Zwraca poprawiony wektor x
+        """
+        THRESHOLD = 0.05
+        x_fixed = list(x)
+        cycling_slots = []
+        
+        for j in range(n):
+            ch = max(0.0, x_fixed[idx_c(j)])
+            dis = max(0.0, x_fixed[idx_d(j)])
+            
+            if ch > THRESHOLD and dis > THRESHOLD:
+                # Cycling detected: zeruj rozładowanie (priorytet: ładowanie)
+                x_fixed[idx_d(j)] = 0.0
+                cycling_slots.append(j)
+        
+        if cycling_slots:
+            self.log(f"Post-processing cycling: znaleziono {len(cycling_slots)} slotów "
+                     f"z ch>0 i dis>0 → zerowanie dis (priorytet: ładowanie)")
+        
+        return x_fixed
+
+    # ------------------------------------------
+    # OPTYMALIZACJA LP
     # ------------------------------------------
     def _solve_lp(self, soc_init: float, horizon: list[dict]) -> list[dict]:
         n = len(horizon)
@@ -506,7 +537,7 @@ class EmsOptimizer(hass.Hass):
         for _ in range(n):
             bounds.append((0.0, BAT_MAX_CHARGE_KW))    # charge
         for _ in range(n):
-            bounds.append((0.0, BAT_MAX_CHARGE_KW))    # discharge - LP używa 5kW jako jednostki decyzyjnej
+            bounds.append((0.0, BAT_MAX_CHARGE_KW))    # discharge
         for j in range(n):
             if bilans_dodatni or horizon[j]["buy_price_pln_kwh"] > G13_POZOSTALE:
                 bounds.append((0.0, 0.0))
@@ -521,26 +552,6 @@ class EmsOptimizer(hass.Hass):
                 A_eq=A_eq, b_eq=b_eq,
                 bounds=bounds, method="highs",
             )
-            def _post_process_cycling(x, idx_c, idx_d, n, horizon):
-    """
-    Jeśli LP zwróci cycling (ch > 0 i dis > 0 w tym samym slocie),
-    usun mniejszy z nich (priorytet: ładowanie > rozładowanie).
-    Następnie przelicz bilans i SoC.
-    """
-    THRESHOLD = 0.05
-    x = list(x)  # Make mutable
-    
-    for j in range(n):
-        ch = max(0.0, x[idx_c(j)])
-        dis = max(0.0, x[idx_d(j)])
-        
-        # Cycling detection
-        if ch > THRESHOLD and dis > THRESHOLD:
-            # Priorytet: ładowanie (ch). Zeruj rozładowanie.
-            x[idx_d(j)] = 0.0
-            # Ewentualnie można też zerować ch, ale ładowanie jest lepsze
-    
-    return x
         except Exception as e:
             self.log(f"linprog exception: {e} - fallback auto", level="WARNING")
             return self._safe_auto_plan(soc_init, horizon)
@@ -549,25 +560,17 @@ class EmsOptimizer(hass.Hass):
             self.log(f"LP status={result.status} ({result.message}) - fallback auto", level="WARNING")
             return self._safe_auto_plan(soc_init, horizon)
 
-        x       = result.x
+        x = result.x
+        
+        # ========== POST-PROCESSING: Eliminate cycling ==========
         x = self._post_process_cycling(x, idx_c, idx_d, n, horizon)
+        # =========================================================
+
         plan    = []
         soc_kwh = soc_init_kwh
 
         # Oblicz okna cenowe dla całego horyzontu
         windows = self._find_price_windows(horizon)
-
-        # DEBUG: log okien
-        #self.log(f"LP DEBUG: soc_init={soc_init_kwh:.2f}kWh")
-        #for jj in range(min(12, len(horizon))):
-        #    ch_r  = max(0.0, x[idx_c(jj)])
-        #    dis_r = max(0.0, x[idx_d(jj)])
-       #     self.log(
-       #         f"LP DEBUG slot {horizon[jj]['dt'].strftime('%H:%M')}: "
-      #          f"ch={ch_r:.2f} dis={dis_r:.2f} "
-      #          f"soc_lp={soc_init_kwh + sum(max(0,x[idx_c(k)])-max(0,x[idx_d(k)]) for k in range(jj+1)):.2f} "
-        #        f"window={windows[jj]}"
-        #    )
 
         for j, slot in enumerate(horizon):
             ch  = max(0.0, x[idx_c(j)])
@@ -577,7 +580,7 @@ class EmsOptimizer(hass.Hass):
 
             soc_pct_now = soc_kwh / BAT_CAPACITY * 100
             mode, reason = self._mode_from_lp(ch, dis, imp, exp, slot, soc_pct_now, windows[j])
-            # SoC z LP (spójne z tym co solver zaplanował)
+            # SoC z LP (teraz poprawione dzięki post-processing cycling'u)
             soc_kwh = max(min_kwh, min(max_kwh, soc_kwh + ch - dis))
 
             plan.append({
@@ -642,49 +645,7 @@ class EmsOptimizer(hass.Hass):
         return min_soc
 
     # ------------------------------------------
-    # SYMULACJA EFEKTU TRYBU NA SOC (bez zmian)
-    # ------------------------------------------
-    def _apply_mode_to_soc(
-        self,
-        mode:    str,
-        soc_kwh: float,
-        slot:    dict,
-        min_kwh: float,
-        max_kwh: float,
-    ) -> float:
-        pv = slot["pv_kwh"]
-        co = slot["consumption_kwh"]
-
-        if mode == "sell_power":
-            # Bateria oddaje różnicę między max mocą falownika a PV
-            dis = min(
-                max(0.0, INVERTER_MAX_KW - pv),
-                BAT_MAX_DISCHARGE_KW,
-                soc_kwh - min_kwh,
-            )
-            soc_kwh -= dis
-        elif mode == "discharge_battery":
-            # Stałe 5 kW zgodnie z EMS power limit
-            dis = min(BAT_MAX_CHARGE_KW, soc_kwh - min_kwh)
-            soc_kwh -= dis
-        elif mode == "charge_battery":
-            # 5 kW z sieci + nadwyżka PV
-            net_pv = max(0.0, pv - co)
-            ch = min(BAT_MAX_CHARGE_KW + net_pv, max_kwh - soc_kwh)
-            soc_kwh += ch
-        elif mode == "auto":
-            net = pv - co
-            if net >= 0:
-                ch = min(net, BAT_MAX_CHARGE_KW, max_kwh - soc_kwh)
-                soc_kwh += ch
-            else:
-                dis = min(-net, BAT_MAX_DISCHARGE_KW, soc_kwh - min_kwh)
-                soc_kwh -= dis
-
-        return max(min_kwh, min(max_kwh, soc_kwh))
-
-    # ------------------------------------------
-    # MAPOWANIE LP -> TRYB GOODWE (bez zmian)
+    # MAPOWANIE LP -> TRYB GOODWE
     # ------------------------------------------
     def _find_price_windows(self, horizon: list[dict]) -> list[str]:
         """
@@ -737,7 +698,6 @@ class EmsOptimizer(hass.Hass):
         # LOGIKA OKIEN CENOWYCH (nadpisuje standardową logikę LP)
         # --------------------------------------------------------
         if window == 'before_min':
-            # Przed najtańszym oknem: bateria czeka na tańsze ładowanie z PV
             if slot["pv_kwh"] >= 3.0:
                 return (
                     "battery_standby",
@@ -751,7 +711,6 @@ class EmsOptimizer(hass.Hass):
                 )
 
         if window == 'cheap':
-            # Najtańsze okno: ładuj baterię z PV
             return (
                 "auto",
                 f"tanie_okno: PV laduje baterie, cena={slot['price_pln_mwh']:.0f} PLN/MWh",
